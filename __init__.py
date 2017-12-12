@@ -25,6 +25,7 @@ class Trainer:
         if USE_CUDA:
             module.cuda()
         self.loss_fn = loss_fn
+        self.add_metric("Loss", loss_fn)
         self.optimizer = optimizer
         self.loss_parameters = []
         self.loss = 0
@@ -32,6 +33,7 @@ class Trainer:
         self.parameter_watcher = []
         self.output_watcher = []
         self.writer = tb.SummaryWriter(logdir)
+        self.metrics = {}
 
     def clear_cache(self):
         self.loss = 0
@@ -59,10 +61,10 @@ class Trainer:
         x, y = torch.stack(x), torch.stack(y)
         x, y = Variable(x, volatile=True), Variable(y, volatile=True)
         with self.watch(epoch):
-            loss = self.get_loss(x, y)
-            if isinstance(loss, autograd.Variable):
-                loss = loss.data[0]
-            self.writer.add_scalar("loss", loss, epoch)
+            y_ = self.model(x)
+            for name, func in self.metrics.items():
+                value = func(y_, y)
+                self.writer.add_scalar(name, value, epoch)
 
     def save(self, filename):
         torch.save(self.module.state_dict(), filename)
@@ -161,3 +163,8 @@ class Trainer:
 
         for hook in hooks:
             hook.remove()
+
+    def add_metric(self, name, func):
+        """
+        """
+        self.metrics[name] = func
