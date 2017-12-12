@@ -10,6 +10,7 @@ import torch.optim as optim
 from progressbar import ProgressBar, Bar, ETA, Percentage
 from .core import USE_CUDA, Variable
 from .modules import *
+from .misc import *
 
 
 def get_parameter(module, path):
