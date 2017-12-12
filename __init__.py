@@ -9,6 +9,14 @@ import torch.nn as nn
 import torch.optim as optim
 from progressbar import ProgressBar, Bar, ETA, Percentage
 from .core import USE_CUDA, Variable
+from .modules import *
+
+
+def get_parameter(module, path):
+    path = path.split(".")
+    for subpath in path:
+        module = getattr(module, subpath)
+    return module
 
 
 class Trainer:
