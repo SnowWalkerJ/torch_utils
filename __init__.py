@@ -60,7 +60,9 @@ class Trainer:
         x, y = Variable(x, volatile=True), Variable(y, volatile=True)
         with self.watch(epoch):
             loss = self.get_loss(x, y)
-            self.writer.add_scalar("loss", loss.data[0], epoch)
+            if isinstance(loss, autograd.Variable):
+                loss = loss.data[0]
+            self.writer.add_scalar("loss", loss, epoch)
 
     def save(self, filename):
         torch.save(self.module.state_dict(), filename)
@@ -122,8 +124,7 @@ class Trainer:
 
     @contextmanager
     def watch(self, epoch: int):
-        hooks = []
-        for func, name, module in self.output_watcher:
+        def hook_factory(name, func, epoch):
             def hook(module, input, output):
                 if func != "hist" or isfunction(func):
                     if isfunction(func):
@@ -136,7 +137,11 @@ class Trainer:
                         self.writer.add_scalar(name, value, epoch)
                 elif func == "hist":
                     self.writer.add_histogram(name, output.data.cpu().numpy(), epoch, bins='auto')
-            handler = module.register_forward_hook(hook)
+            return hook
+
+        hooks = []
+        for func, name, module in self.output_watcher:
+            handler = module.register_forward_hook(hook_factory(name, func, epoch))
             hooks.append(handler)
         
         yield
