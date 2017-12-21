@@ -129,7 +129,9 @@ class Trainer:
     def watch(self, epoch: int):
         def hook_factory(name, func, epoch):
             def hook(module, input, output):
-                if func != "hist" or isfunction(func):
+                if func == "hist":
+                    self.writer.add_histogram(name, output.data.cpu().numpy(), epoch, bins='auto')
+                else:
                     if isfunction(func):
                         value = func(output.data)
                     else:
@@ -138,8 +140,7 @@ class Trainer:
                         self.writer.add_scalars(name, pd.Series(value).to_dict(), epoch)
                     else:
                         self.writer.add_scalar(name, value, epoch)
-                elif func == "hist":
-                    self.writer.add_histogram(name, output.data.cpu().numpy(), epoch, bins='auto')
+                
             return hook
 
         hooks = []

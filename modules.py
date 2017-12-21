@@ -74,3 +74,64 @@ class Attention(nn.Module):
         att = F.sigmoid(att)
         x = self.activation_fn(x)
         return x * att
+
+
+class DropConnect(nn.Module):
+    """
+    DropConnect randomly sets the weights of the connection to zero at a probability of `drop_prob`
+    """
+    def __init__(self, in_features, out_features, drop_prob=0.5, bias=True):
+        self.in_features = in_features
+        self.out_features = out_features
+        self.drop_prob = drop_prob
+        super(DropConnect, self).__init__()
+        self.weight = nn.Parameter(torch.Tensor(in_features, out_features))
+        if bias:
+            self.bias = nn.Parameter(torch.zeros(1, 1, out_features))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.xavier_normal(self.weight.data)
+
+    def forward(self, x):
+        if self.training:
+            batch_size = x.size(0)
+            drop_mask = torch.Tensor(batch_size, self.in_features, self.out_features).fill_(self.drop_prob).bernoulli_()
+            weight = self.weight.unsqueeze(0).expand(batch_size, -1, -1) * drop_mask
+            x = x.unsqueeze(1)
+            y = torch.baddbmm(self.bias, x, weight).squeeze(1)
+        else:
+            y = torch.addmm(self.bias.squeeze(0), x, self.weight, alpha=self.drop_prob)
+        return y
+
+
+class Reshape(nn.Module):
+    """
+    Wraps the reshape operation in a Module
+    """
+    def __init__(self, *shape):
+        self.shape = shape
+        super(Reshape, self).__init__()
+
+    def forward(self, input_variable):
+        return input_variable.view(*self.shape)
+
+
+class GetItem(nn.Module):
+    def __init__(self, item):
+        self.item = item
+        super(GetItem, self).__init__()
+
+    def forward(self, input_variable):
+        return input_variable.__getitem__(self.item)
+
+
+class Squeeze(nn.Module):
+    def __init__(self, *dims):
+        self.dims = dims
+        super(Squeeze, self).__init__()
+
+    def forward(self, input_variable):
+        return input_variable.squeeze(*self.dims)
