@@ -1,5 +1,6 @@
 import graphviz
 import torch
+import torch.autograd as autograd
 import torch.nn as nn
 
 
@@ -80,6 +81,8 @@ def inspect_module(module, v):
         return str(id(variable))
 
     def hook(module, inputs, output):
+        if not isinstance(output, autograd.Variable):
+            return
         if not isinstance(inputs, tuple):
             inputs = (inputs, )
         o_id = var_to_id(output)

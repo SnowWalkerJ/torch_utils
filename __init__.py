@@ -1,3 +1,4 @@
+from collections import defaultdict
 from contextlib import contextmanager
 from inspect import isfunction
 import numpy as np
@@ -7,6 +8,7 @@ import torch
 import torch.autograd as autograd
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import DataLoader
 from progressbar import ProgressBar, Bar, ETA, Percentage
 from .core import USE_CUDA, Variable
 from .modules import *
@@ -26,20 +28,21 @@ class Trainer:
         if USE_CUDA:
             module.cuda()
         self.loss_fn = loss_fn
+        self.metrics = {}
         self.add_metric("Loss", loss_fn)
         self.optimizer = optimizer
         self.loss_parameters = []
-        self.loss = 0
+        self.loss = defaultdict(list)
         self.module.register_forward_pre_hook(lambda m, n: self.clear_cache()) # Clear cache every time the module is called
         self.parameter_watcher = []
         self.output_watcher = []
         self.writer = tb.SummaryWriter(logdir)
-        self.metrics = {}
+        self.batch_size = 32
 
     def clear_cache(self):
-        self.loss = 0
+        self.loss.clear()
 
-    def train_once(self, dataloader):
+    def train_once(self, dataloader: DataLoader):
         self.module.train()
         for x, y in dataloader:
             x, y = Variable(x), Variable(y)
@@ -49,23 +52,28 @@ class Trainer:
             loss.backward()
             self.optimizer.step()
 
-    def train(self, dataloader, num_epochs, validate_data=None):
+    def train(self, dataloader: DataLoader, num_epochs: int, validate_data=None):
+        self.batch_size = dataloader.batch_size // 2
         progressbar = ProgressBar(widgets=[Percentage(), Bar(), ETA()])
         for epoch in progressbar(range(num_epochs)):
             self.train_once(dataloader)
             if validate_data is not None:
                 self.show_metrics(epoch, validate_data)
 
-    def show_metrics(self, epoch, dataset):
+    def show_metrics(self, epoch: int, dataset):
         self.module.eval()
-        x, y = zip(*dataset)
-        x, y = torch.stack(x), torch.stack(y)
-        x, y = Variable(x, volatile=True), Variable(y, volatile=True)
+        dataloader = DataLoader(dataset, batch_size=self.batch_size, pin_memory=USE_CUDA)
+        data = defaultdict(list)
         with self.watch(epoch):
-            y_ = self.model(x)
-            for name, func in self.metrics.items():
-                value = func(y_, y)
-                self.writer.add_scalar(name, value, epoch)
+            for x, y in dataloader:
+                x = Variable(x, volatile=True)
+                y = Variable(y, volatile=True)
+                y_ = self.module(x)
+                for name, func in self.metrics.items():
+                    value = func(y_, y)
+                    data[name].append(value.data[0])
+            for key, value in data.items():
+                self.writer.add_scalar(key, np.mean(value), epoch)
 
     def save(self, filename):
         torch.save(self.module.state_dict(), filename)
@@ -78,7 +86,7 @@ class Trainer:
             raise RuntimeError("The module of an output loss must be a children of the root module")
 
         def hook(module, input, output):
-            self.loss += func(output)
+            self.loss[module].append(func(output))
 
         handler = module.register_forward_hook(hook)
         return handler
@@ -88,7 +96,9 @@ class Trainer:
         Total Loss = Parameter Loss + Output Loss + Loss_fn
         """
         loss = self.loss_fn(self.module(x), y)
-        return self.loss + sum(func(parameter) for parameter, func in self.loss_parameters) + loss
+        output_loss = sum(torch.stack(v).mean() for v in self.loss.values())
+        parameter_loss = sum(func(parameter) for parameter, func in self.loss_parameters)
+        return loss + output_loss + parameter_loss
 
     def watch_parameter(self, parameter, name: str, func='hist'):
         """

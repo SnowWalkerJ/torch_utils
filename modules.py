@@ -118,6 +118,9 @@ class Reshape(nn.Module):
     def forward(self, input_variable):
         return input_variable.view(*self.shape)
 
+    def __str__(self):
+        return "Reshape" + self.shape
+
 
 class GetItem(nn.Module):
     def __init__(self, item):
@@ -127,6 +130,9 @@ class GetItem(nn.Module):
     def forward(self, input_variable):
         return input_variable.__getitem__(self.item)
 
+    def __str__(self):
+        return "GetItem()"
+
 
 class Squeeze(nn.Module):
     def __init__(self, *dims):
@@ -135,3 +141,6 @@ class Squeeze(nn.Module):
 
     def forward(self, input_variable):
         return input_variable.squeeze(*self.dims)
+
+    def __str__(self):
+        return "Squeeze" + str(self.dims)
