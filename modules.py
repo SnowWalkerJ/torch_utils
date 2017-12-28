@@ -119,7 +119,7 @@ class Reshape(nn.Module):
         return input_variable.view(*self.shape)
 
     def __str__(self):
-        return "Reshape" + self.shape
+        return "Reshape" + str(self.shape)
 
 
 class GetItem(nn.Module):
