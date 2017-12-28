@@ -8,7 +8,7 @@ import torch
 import torch.autograd as autograd
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from progressbar import ProgressBar, Bar, ETA, Percentage
 from .core import USE_CUDA, Variable
 from .modules import *
@@ -38,6 +38,7 @@ class Trainer:
         self.output_watcher = []
         self.writer = tb.SummaryWriter(logdir)
         self.batch_size = 32
+        self.num_workers = 0
 
     def clear_cache(self):
         self.loss.clear()
@@ -54,34 +55,63 @@ class Trainer:
 
     def train(self, dataloader: DataLoader, num_epochs: int, validate_data=None):
         self.batch_size = dataloader.batch_size // 2
+        self.num_workers = dataloader.num_workers // 2
         progressbar = ProgressBar(widgets=[Percentage(), Bar(), ETA()])
         for epoch in progressbar(range(num_epochs)):
             self.train_once(dataloader)
             if validate_data is not None:
                 self.show_metrics(epoch, validate_data)
 
-    def show_metrics(self, epoch: int, dataset):
+    def show_metrics(self, epoch: int, dataset: Dataset, dataset_name: str=None):
         self.module.eval()
-        dataloader = DataLoader(dataset, batch_size=self.batch_size, pin_memory=USE_CUDA)
+        dataloader = DataLoader(dataset, batch_size=self.batch_size, pin_memory=USE_CUDA, num_workers=self.num_workers)
         data = defaultdict(list)
-        with self.watch(epoch):
-            for x, y in dataloader:
-                x = Variable(x, volatile=True)
-                y = Variable(y, volatile=True)
+        
+        for i, (x, y) in enumerate(dataloader):
+            x = Variable(x, volatile=True)
+            y = Variable(y, volatile=True)
+            if i == 0:
+                with self.watch(epoch, dataset_name):
+                    y_ = self.module(x)
+            else:
                 y_ = self.module(x)
-                for name, func in self.metrics.items():
-                    value = func(y_, y)
-                    data[name].append(value.data[0])
-            for key, value in data.items():
-                self.writer.add_scalar(key, np.mean(value), epoch)
+            for name, func in self.metrics.items():
+                if dataset_name is not None:
+                    name = "_".join([dataset_name, name])
+                value = func(y_, y)
+                data[name].append(value.data[0])
+        for key, value in data.items():
+            self.writer.add_scalar(key, np.mean(value), epoch)
 
     def save(self, filename):
         torch.save(self.module.state_dict(), filename)
 
-    def add_parameter_loss(self, parameter: autograd.Variable, func):
+    def add_parameter_loss(self, parameter: nn.Parameter, func):
+        """
+        Add a loss function that will be applied to a specific parameter.
+
+        Parameters
+        ----------
+        parameter: nn.Parameter
+            the parameter the the loss will be applied to
+        func: Function
+            the loss function that maps the parameter to a scalar variable,
+            such as L1, L2
+        """
         self.loss_parameters.append((parameter, func))
 
     def add_output_loss(self, module: nn.Module, func):
+        """
+        Add a loss function that will be applied to the output of a module.
+        This is usually used to apply restrictions to the distributions of the output.
+
+        Parameters
+        ----------
+        module: nn.Module
+            the module whose output will be set as loss
+        func: Function
+            the loss function that maps the output to a scalar variable
+        """
         if module not in self.module.modules():
             raise RuntimeError("The module of an output loss must be a children of the root module")
 
@@ -136,7 +166,7 @@ class Trainer:
         self.output_watcher.append((func, name, module))
 
     @contextmanager
-    def watch(self, epoch: int):
+    def watch(self, epoch: int, dataset_name: str=None):
         def hook_factory(name, func, epoch):
             def hook(module, input, output):
                 if func == "hist":
@@ -155,12 +185,16 @@ class Trainer:
 
         hooks = []
         for func, name, module in self.output_watcher:
+            if dataset_name is not None:
+                name = "_".join([dataset_name, name])
             handler = module.register_forward_hook(hook_factory(name, func, epoch))
             hooks.append(handler)
         
         yield
 
         for func, name, parameter in self.parameter_watcher:
+            if dataset_name is not None:
+                name = "_".join([dataset_name, name])
             if func != "hist" or isfunction(func):
                 if isfunction(func):
                     value = func(parameter.data)
@@ -178,5 +212,13 @@ class Trainer:
 
     def add_metric(self, name, func):
         """
+        Add a scalar metric regarding the output of the module and the target
+
+        Parameters
+        ----------
+        name: str
+            the name of the metric
+        func
+            (output, target) -> Scalar Variable
         """
         self.metrics[name] = func
