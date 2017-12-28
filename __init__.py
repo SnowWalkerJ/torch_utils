@@ -60,7 +60,11 @@ class Trainer:
         for epoch in progressbar(range(num_epochs)):
             self.train_once(dataloader)
             if validate_data is not None:
-                self.show_metrics(epoch, validate_data)
+                if isinstance(validate_data, dict):
+                    for name, dataset in validate_data.items():
+                        self.show_metrics(epoch, dataset, name)
+                else:
+                    self.show_metrics(epoch, validate_data)
 
     def show_metrics(self, epoch: int, dataset: Dataset, dataset_name: str=None):
         self.module.eval()
