@@ -1,0 +1,1 @@
+from .dist_loss import L1loss, L2loss
